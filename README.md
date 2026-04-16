@@ -1,11 +1,14 @@
-# rezka-api
+# rezka.ts
 
 > Unofficial TypeScript API wrapper for the [HDRezka](https://rezka.ag) streaming service.
 
 ## Features
 
-- **No boilerplate** — top-level `search()` and `load()` functions, no class instantiation required
+- **No boilerplate** — top-level `search()`, `load()`, `browse()` functions, no class instantiation required
 - **Unified stream API** — one `.streams()` call for movies; fluent `.episode(s, e).streams()` for series
+- **Rich metadata** — IMDb/KP ratings, actors, directors, genres, country, duration and more, parsed eagerly
+- **Browse catalog** — list movies/series by type, filter (`last`, `popular`, `soon`) and page
+- **Authentication** — `login()` returns a ready-to-use authenticated client
 - **Consistent types** — all IDs are `number`, `type` is a proper union, not `string`
 - **Smart defaults** — omit `translationId` to auto-use the first available track
 - **TypeScript-first** — full type definitions, zero `any`
@@ -16,11 +19,11 @@
 ## Installation
 
 ```bash
-npm install rezka-api
+npm install rezka.ts
 # or
-yarn add rezka-api
+yarn add rezka.ts
 # or
-pnpm add rezka-api
+pnpm add rezka.ts
 ```
 
 **Requires Node.js ≥ 18.**
@@ -30,8 +33,8 @@ pnpm add rezka-api
 ## Quick Start
 
 ```typescript
-import { search, load } from 'rezka-api';
-// or: import rezka from 'rezka-api';  then rezka.search(...) / rezka.load(...)
+import { search, load, browse } from 'rezka.ts';
+// or: import rezka from 'rezka.ts';  then rezka.search(...) / rezka.load(...)
 
 // 1. Search
 const results = await search('mr robot');
@@ -40,19 +43,28 @@ console.log(results[0]);
 
 // 2. Load media page — all metadata available synchronously
 const media = await load(results[0].url);
-console.log(media.title);        // "Мистер Робот"
-console.log(media.origTitle);    // "Mr. Robot"
-console.log(media.type);         // "series"
-console.log(media.translations); // [{ id: 56, title: 'English' }, ...]
+console.log(media.title);           // "Мистер Робот"
+console.log(media.origTitle);       // "Mr. Robot"
+console.log(media.type);            // "series"
+console.log(media.rating.imdb);     // { score: 8.5, votes: 1234567 }
+console.log(media.directors);       // ['Sam Esmail']
+console.log(media.actors);          // ['Rami Malek', ...]
+console.log(media.genres);          // ['Thriller', 'Drama']
+console.log(media.translations);    // [{ id: 56, title: 'English' }, ...]
 
 // 3a. Movie — get streams directly
-const streams = await media.streams();       // uses first translation
-const streams = await media.streams(56);    // or pick a specific one
+const streams = await media.streams();     // uses first translation
+const streams = await media.streams(56);   // or pick a specific one
 console.log(streams);  // { '1080p': 'https://...m3u8', '720p': '...', ... }
 
 // 3b. Series — fluent episode selector
 const streams = await media.episode(1, 1).streams();     // S01E01, default translation
-const streams = await media.episode(1, 3).streams(56);   // S01E03, English
+const streams = await media.episode(1, 3).streams(56);   // S01E03, specific translation
+
+// 4. Browse catalog
+const page = await browse({ type: 'movie', filter: 'popular' });
+console.log(page.items[0].title);
+console.log(page.hasNextPage); // → call with page: 2
 ```
 
 ---
@@ -92,12 +104,66 @@ const media = await load('https://rezka.ag/films/action/12345-inception.html');
 
 ---
 
+### `browse(browseOptions?, clientOptions?)`
+
+```typescript
+browse(browseOptions?: BrowseOptions, clientOptions?: RezkaOptions): Promise<BrowsePage>
+```
+
+Browse the HDRezka catalog — returns a paginated list of items.
+
+```typescript
+import { browse } from 'rezka.ts';
+
+// Popular movies, page 1
+const page = await browse({ type: 'movie', filter: 'popular' });
+console.log(page.items);      // BrowseItem[]
+console.log(page.hasNextPage); // true → fetch page 2
+
+// Latest series, page 2
+const page2 = await browse({ type: 'series', filter: 'last', page: 2 });
+
+// Specific genre URL
+const comedy = await browse({ genreUrl: '/films/comedy/' });
+```
+
+#### `BrowseOptions`
+
+| Option | Type | Description |
+|---|---|---|
+| `type` | `'movie' \| 'series' \| 'cartoon' \| 'anime'` | Content type to browse |
+| `filter` | `'last' \| 'popular' \| 'soon' \| 'watching'` | Sort order |
+| `page` | `number` | Page number, 1-based (default: `1`) |
+| `genreUrl` | `string` | Direct genre path, e.g. `'/films/comedy/'` — overrides `type` |
+
+---
+
+### `login(email, password, options?)`
+
+```typescript
+login(email: string, password: string, options?: RezkaOptions): Promise<client>
+```
+
+Log in to HDRezka. Returns an **authenticated client** with session cookies baked in — use it like `createClient()`.
+
+```typescript
+import { login } from 'rezka.ts';
+
+const client = await login('you@email.com', 'password');
+const results = await client.search('inception');
+const media   = await client.load(results[0].url);
+```
+
+**Throws** if credentials are incorrect.
+
+---
+
 ### `createClient(options)`
 
 For cases where you need a **custom mirror, timeout, or shared configuration**. Returns an object with the same `search` and `load` methods bound to that config.
 
 ```typescript
-import { createClient } from 'rezka-api';
+import { createClient } from 'rezka.ts';
 
 const client = createClient({
   baseUrl: 'https://my-mirror.com',
@@ -133,10 +199,19 @@ Returned by `load()`. All metadata is parsed eagerly and available as **readonly
 | `title` | `string` | Localized title |
 | `origTitle` | `string \| null` | Original (non-localized) title |
 | `type` | `MediaType` | `'movie' \| 'series' \| 'animation' \| 'cartoon' \| 'anime' \| 'documentary' \| 'unknown'` |
-| `year` | `string \| null` | Release year (from the metadata table) |
+| `year` | `string \| null` | Release year |
 | `thumbnail` | `string \| null` | Poster image URL |
 | `description` | `string \| null` | Plot description |
-| `info` | `InfoRow[]` | Structured metadata table (genre, country, director, cast…) |
+| `rating` | `{ imdb: Rating \| null; kp: Rating \| null }` | IMDb and KinoPoisk scores |
+| `slogan` | `string \| null` | Tagline / slogan |
+| `country` | `string \| null` | Country of production |
+| `quality` | `string \| null` | Video quality label (e.g. `'HDRip'`) |
+| `ageRating` | `number \| null` | Age restriction as a number (e.g. `16`) |
+| `duration` | `number \| null` | Runtime in minutes |
+| `genres` | `string[]` | Genre names |
+| `directors` | `string[]` | Director names |
+| `actors` | `string[]` | Main cast names |
+| `info` | `InfoRow[]` | Raw metadata table rows |
 | `translations` | `Translation[]` | Available audio tracks — pass `.id` to `.streams()` |
 | `seasons` | `Season[]` | Season list — empty array for movies |
 
@@ -149,7 +224,7 @@ episodes(seasonId: number): Episode[]
 Get the episode list for a season. IDs come from `media.seasons`.
 
 ```typescript
-const season   = media.seasons[0];          // { id: 1, title: 'Season 1' }
+const season   = media.seasons[0];           // { id: 1, title: 'Season 1' }
 const episodes = media.episodes(season.id);  // [{ id, episodeId, seasonId, title }]
 ```
 
@@ -163,8 +238,8 @@ Select a specific episode. Returns an `EpisodeRef` synchronously (no network cal
 
 ```typescript
 const ref     = media.episode(1, 1);
-const streams = await ref.streams();       // first available translation
-const streams = await ref.streams(56);     // specific translation ID
+const streams = await ref.streams();     // first available translation
+const streams = await ref.streams(56);   // specific translation ID
 ```
 
 #### `media.streams(translationId?)`
@@ -188,40 +263,45 @@ const url1080 = streams['1080p'];
 ### Types
 
 ```typescript
-type MediaType = 'movie' | 'series' | 'animation' | 'cartoon' | 'anime' | 'documentary' | 'unknown';
-type StreamUrls = Record<string, string>;  // quality → HLS URL
+type MediaType    = 'movie' | 'series' | 'animation' | 'cartoon' | 'anime' | 'documentary' | 'unknown';
+type StreamUrls   = Record<string, string>;  // quality → HLS URL
+type BrowseFilter = 'last' | 'popular' | 'soon' | 'watching';
 
+interface Rating       { score: number; votes: number; }
 interface SearchResult { url: string; title: string; type: MediaType; year: string; }
 interface Translation  { id: number; title: string; }
 interface Season       { id: number; title: string; }
 interface Episode      { id: number; episodeId: number; seasonId: number; title: string; }
 interface InfoRow      { key: string; value: string; }
 interface EpisodeRef   { streams(translationId?: number): Promise<StreamUrls>; }
+interface BrowseItem   { id: number; url: string; title: string; poster: string; type: MediaType; info: string; }
+interface BrowsePage   { items: BrowseItem[]; page: number; hasNextPage: boolean; }
+interface BrowseOptions {
+  type?: 'movie' | 'series' | 'cartoon' | 'anime';
+  filter?: BrowseFilter;
+  page?: number;
+  genreUrl?: string;
+}
 ```
 
 ---
 
-## Full Example — Browse and Stream a Series
+## Full Example — Series
 
 ```typescript
-import { search, load } from 'rezka-api';
+import { search, load } from 'rezka.ts';
 
 const results = await search('mr robot');
 const media   = await load(results[0].url);
 
-console.log(`${media.title} (${media.origTitle})`);  // Мистер Робот (Mr. Robot)
-console.log(`Type: ${media.type}`);                  // series
-console.log(`Year: ${media.year}`);
-
-// Translations
-media.translations.forEach(t => console.log(`[${t.id}] ${t.title}`));
-// [56] English
-// [238] Русский
+console.log(`${media.title} (${media.origTitle})`);       // Мистер Робот (Mr. Robot)
+console.log(`IMDb: ${media.rating.imdb?.score}`);         // IMDb: 8.5
+console.log(`Genres: ${media.genres.join(', ')}`);
+console.log(`Directors: ${media.directors.join(', ')}`);
 
 // Seasons & episodes
 const season   = media.seasons[0];
 const episodes = media.episodes(season.id);
-console.log(`${season.title}: ${episodes.length} episodes`);
 
 // Stream S01E01 with the first available translation
 const streams = await media.episode(season.id, episodes[0].episodeId).streams();
@@ -231,21 +311,38 @@ console.log('1080p:', streams['1080p']);
 
 ---
 
-## Full Example — Stream a Movie
+## Full Example — Movie
 
 ```typescript
-import { search, load } from 'rezka-api';
+import { search, load } from 'rezka.ts';
 
 const results = await search('inception');
 const media   = await load(results[0].url);
 
-// Get all qualities, auto-pick first translation
-const streams = await media.streams();
-console.log(streams);
-// { '1080p': 'https://...m3u8', '720p': '...', '480p': '...' }
+console.log(`${media.duration} min, ${media.country}, ${media.ageRating}+`);
 
-// Pick a specific translation
-const streams = await media.streams(56);
+const streams = await media.streams();    // auto first translation
+const streams = await media.streams(56); // specific translation
+console.log(streams);
+// { '1080p': 'https://...m3u8', '720p': '...', '4K': '...' }
+```
+
+---
+
+## Full Example — Browse Catalog
+
+```typescript
+import { browse } from 'rezka.ts';
+
+let page = 1;
+while (true) {
+  const result = await browse({ type: 'series', filter: 'popular', page });
+  for (const item of result.items) {
+    console.log(`[${item.id}] ${item.title}  ${item.info}`);
+  }
+  if (!result.hasNextPage) break;
+  page++;
+}
 ```
 
 ---
@@ -253,32 +350,22 @@ const streams = await media.streams(56);
 ## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Build (CJS + ESM → dist/)
-npm run build
-
-# Run tests
-npm test
-
-# Watch mode
-npm run test:watch
-
-# Type-check
+npm run build       # CJS + ESM → dist/
+npm test            # 59 tests
 npm run typecheck
 ```
 
 ### Project Structure
 
 ```
-rezka-api/
+rezka.ts/
 ├── src/
-│   ├── types.ts        # All TypeScript types and interfaces
-│   ├── utils.ts        # Stream URL decoder, parser, type detector
-│   ├── http.ts         # Axios client factory
-│   ├── Media.ts        # Media class — metadata + stream methods
-│   └── index.ts        # Public API: search(), load(), createClient()
+│   ├── types.ts   # All TypeScript types and interfaces
+│   ├── utils.ts   # Stream URL decoder, parser, type detector
+│   ├── http.ts    # Axios client factory
+│   ├── Media.ts   # Media class — metadata + stream methods
+│   └── index.ts   # Public API: search(), load(), browse(), login(), createClient()
 ├── tests/
 │   ├── utils.test.ts   # Unit tests (decoder, parser, type detection)
 │   └── rezka.test.ts   # Integration tests with mocked HTTP
