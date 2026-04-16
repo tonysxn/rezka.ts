@@ -22,7 +22,6 @@ Thumbs.db
 # Env
 .env
 .env.local
-package-lock.json
 
 # Local test scripts
 index.js
