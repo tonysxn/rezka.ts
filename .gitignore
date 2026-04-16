@@ -1,0 +1,28 @@
+# IDE
+.idea
+.vscode
+
+# Dependencies
+node_modules
+
+# Build output
+dist
+
+# Test coverage
+coverage
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+package-lock.json
+
+# Local test scripts
+index.js

@@ -1,0 +1,63 @@
+{
+  "name": "rezka-api",
+  "version": "2.0.0",
+  "description": "Unofficial TypeScript API wrapper for the HDRezka streaming service",
+  "author": "neverlxsss",
+  "license": "ISC",
+  "keywords": [
+    "hdrezka",
+    "rezka",
+    "api",
+    "streaming",
+    "typescript",
+    "wrapper"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "node-html-parser": "^6.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "axios-mock-adapter": "^1.22.0",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neverlxsss/rezka-api"
+  }
+}
