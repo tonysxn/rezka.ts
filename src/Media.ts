@@ -88,7 +88,7 @@ export class Media {
     this.origTitle = this.root.querySelector('.b-post__origtitle')?.innerText.trim() ?? null;
     this.thumbnail = this.root.querySelector('.b-sidecover img')?.getAttribute('src') ?? null;
     this.description = this.root.querySelector('.b-post__description_text')?.innerText.trim() ?? null;
-    this.year = this.info.find(r => /год|year/i.test(r.key))?.value ?? null;
+    this.year = (() => { const _r = this.info.find((_row) => /год|year|выход/i.test(_row.key)); if (!_r) return null; const _m = _r.value.match(/\d{4}/); return _m ? _m[0] : _r.value.trim() || null; })();
     this.translations = this.parseTranslations();
     this.seasons = this.parseSeasons();
     this.rating = this.parseRating();
@@ -225,9 +225,16 @@ export class Media {
 
   private parseTranslations(): Translation[] {
     const list = this.root.getElementById('translators-list');
-    if (!list) return [];
+    if (!list) {
+      const scripts = this.root.querySelectorAll('script');
+      for (const s of scripts) {
+        const m = s.innerText.match(/initCDNMoviesEvents\(\s*\d+\s*,\s*(\d+)\s*,/);
+        if (m) return [{ id: parseInt(m[1], 10), title: 'Default' }];
+      }
+      return [];
+    }
 
-    return list.getElementsByTagName('li').map(el => ({
+    return list.querySelectorAll('[data-translator_id]').map(el => ({
       id: parseInt(el.getAttribute('data-translator_id') ?? '0', 10),
       title: el.getAttribute('title') || el.innerText.trim(),
     }));
