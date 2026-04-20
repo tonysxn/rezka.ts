@@ -169,7 +169,7 @@ export class Media {
    * ```
    */
   async streams(translationId?: number): Promise<StreamUrls> {
-    if (this.hasSeriesSignal()) {
+    if (this.seasons.length > 0 || this.hasSeriesSignal()) {
       throw new Error(
         `"${this.title}" is a ${this.type}. ` +
           'Use media.episode(seasonId, episodeId).streams() to get episode streams.'
