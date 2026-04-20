@@ -6,6 +6,7 @@
 
 - **No boilerplate** — top-level `search()`, `load()`, `browse()` functions, no class instantiation required
 - **Unified stream API** — one `.streams()` call for movies; fluent `.episode(s, e).streams()` for series
+- **Transparent AJAX hydration** — `load()` silently fetches lazy-loaded seasons/episodes for popular series (see [below](#transparent-ajax-hydration))
 - **Rich metadata** — IMDb/KP ratings, actors, directors, genres, country, duration and more, parsed eagerly
 - **Browse catalog** — list movies/series by type, filter (`last`, `popular`, `soon`) and page
 - **Authentication** — `login()` returns a ready-to-use authenticated client
@@ -13,6 +14,55 @@
 - **Smart defaults** — omit `translationId` to auto-use the first available track
 - **TypeScript-first** — full type definitions, zero `any`
 - **Dual CJS / ESM** — works in any Node.js project (CommonJS or ESM)
+
+---
+
+## Transparent AJAX Hydration
+
+### The problem: lazy-loaded seasons on popular series
+
+HDRezka optimises its server load by **not rendering season/episode tabs in the initial HTML** for high-traffic series. Instead, the browser triggers an AJAX call once the page has loaded and populates the tabs dynamically. A plain HTML parser (like `node-html-parser`) cannot see this deferred content, so naïve scraping returns `seasons: []`.
+
+### How `load()` solves it automatically
+
+When `load(url)` detects that the returned `Media` object has no seasons **and** the page embeds an `initCDNSeriesEvents(…)` JavaScript call (the reliable signal that this is a series player), it transparently fires a single background POST to:
+
+```
+POST /ajax/get_cdn_series/
+  id            = <post_id>
+  translator_id = <default_translator_id>
+  action        = get_episodes
+```
+
+The response contains two HTML fragments:
+
+| Key | Content |
+|---|---|
+| `seasons` | `<li data-tab_id="N">Сезон N</li>` — season tabs |
+| `episodes` | `<ul id="simple-episodes-list-N">…</ul>` — all episode lists |
+
+The library parses these fragments and populates `media.seasons` and an internal episode cache. All subsequent calls to `media.episodes(seasonId)` are served from that cache — **no extra network round-trips**.
+
+### What this means for you
+
+```typescript
+// Works the same for a 3-episode indie series and a blockbuster with 5 seasons:
+const media = await load('https://rezka.ag/series/action/31432-pacany-2019-latest.html');
+
+console.log(media.seasons);
+// [ { id: 1, title: 'Сезон 1' }, { id: 2, title: 'Сезон 2' }, … ]  ← always populated
+
+console.log(media.translations);
+// [ { id: 376, title: 'HDrezka Studio' }, … ]  ← full list, not just "Default"
+
+const eps = media.episodes(1);
+// [ { episodeId: 1, title: 'Серия 1' }, … ]  ← from AJAX cache if needed
+
+const streams = await media.episode(1, 1).streams();
+// { '1080p': 'https://…', '720p': '…' }
+```
+
+The hydration is **completely transparent** — you never call it manually; `load()` handles everything.
 
 ---
 

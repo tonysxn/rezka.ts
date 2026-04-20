@@ -9,6 +9,13 @@ interface CdnResponse {
   message?: string;
 }
 
+interface AjaxEpisodesResponse {
+  success: boolean;
+  message?: string;
+  seasons?: string;
+  episodes?: string;
+}
+
 // ─── EpisodeRef ───────────────────────────────────────────────────────────────
 
 /**
@@ -51,9 +58,9 @@ export class Media {
   /** Structured metadata rows (genre, country, director, cast…) */
   readonly info: InfoRow[];
   /** Available audio translations. Pass `.id` to `.streams()` */
-  readonly translations: Translation[];
+  translations: Translation[];
   /** Season list — empty for movies */
-  readonly seasons: Season[];
+  seasons: Season[];
   /** IMDb and KinoPoisk ratings */
   readonly rating: { imdb: Rating | null; kp: Rating | null };
   /** Tagline / slogan, or `null` */
@@ -75,6 +82,7 @@ export class Media {
 
   private readonly root: HTMLElement;
   private readonly http: AxiosInstance;
+  private _hydratedEpisodesMap: Map<number, Episode[]> | null = null;
 
   constructor(html: string, url: string, http: AxiosInstance) {
     this.root = parse(html);
@@ -109,6 +117,10 @@ export class Media {
    * @param seasonId - Use an `id` value from `media.seasons`
    */
   episodes(seasonId: number): Episode[] {
+    if (this._hydratedEpisodesMap) {
+      return this._hydratedEpisodesMap.get(seasonId) ?? [];
+    }
+
     const root = this.root.getElementById(`simple-episodes-list-${seasonId}`);
     if (!root) return [];
 
@@ -157,7 +169,7 @@ export class Media {
    * ```
    */
   async streams(translationId?: number): Promise<StreamUrls> {
-    if (this.type === 'series' || this.type === 'anime' || this.type === 'cartoon') {
+    if (this.hasSeriesSignal()) {
       throw new Error(
         `"${this.title}" is a ${this.type}. ` +
           'Use media.episode(seasonId, episodeId).streams() to get episode streams.'
@@ -228,7 +240,9 @@ export class Media {
     if (!list) {
       const scripts = this.root.querySelectorAll('script');
       for (const s of scripts) {
-        const m = s.innerText.match(/initCDNMoviesEvents\(\s*\d+\s*,\s*(\d+)\s*,/);
+        const m =
+          s.innerText.match(/initCDNSeriesEvents\s*\(\s*\d+\s*,\s*(\d+)\s*,/) ??
+          s.innerText.match(/initCDNMoviesEvents\s*\(\s*\d+\s*,\s*(\d+)\s*,/);
         if (m) return [{ id: parseInt(m[1], 10), title: 'Default' }];
       }
       return [];
@@ -238,6 +252,74 @@ export class Media {
       id: parseInt(el.getAttribute('data-translator_id') ?? '0', 10),
       title: el.getAttribute('title') || el.innerText.trim(),
     }));
+  }
+
+  /**
+   * Returns `true` when the page embeds an `initCDNSeriesEvents` call,
+   * which is the reliable signal that this page represents a **series**
+   * (regardless of the URL-based `type`) and its episodes may be lazy-loaded.
+   * Used internally by `load()` to decide whether hydration is needed.
+   */
+  hasSeriesSignal(): boolean {
+    for (const s of this.root.querySelectorAll('script')) {
+      if (s.innerText.includes('initCDNSeriesEvents')) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Fetches seasons and episodes via AJAX when the static HTML does not
+   * include `#simple-seasons-tabs` (lazy-loaded for popular series).
+   * Called automatically by `load()` — do not call manually.
+   */
+  async hydrateFromAjax(): Promise<void> {
+    const tid = this.translations[0]?.id;
+    if (tid === undefined) return;
+
+    try {
+      const response = await this.http.post<AjaxEpisodesResponse>(
+        '/ajax/get_cdn_series/',
+        new URLSearchParams({
+          id: String(this.id),
+          translator_id: String(tid),
+          action: 'get_episodes',
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' } }
+      );
+
+      const data = response.data;
+      if (!data?.success) return;
+
+      if (data.seasons) {
+        const seasonsRoot = parse(`<ul>${data.seasons}</ul>`);
+        const parsed = seasonsRoot.getElementsByTagName('li').map(el => ({
+          id: parseInt(el.getAttribute('data-tab_id') ?? '0', 10),
+          title: el.innerText.trim(),
+        })).filter(s => s.id > 0);
+        if (parsed.length > 0) this.seasons = parsed;
+      }
+
+      if (data.episodes) {
+        this._hydratedEpisodesMap = new Map();
+        const epsRoot = parse(data.episodes);
+        for (const ul of epsRoot.querySelectorAll('ul[id^="simple-episodes-list-"]')) {
+          const seasonId = parseInt(
+            (ul.getAttribute('id') ?? '').replace('simple-episodes-list-', ''),
+            10
+          );
+          if (!seasonId) continue;
+          const eps = ul.getElementsByTagName('li').map(el => ({
+            id: parseInt(el.getAttribute('data-id') ?? '0', 10),
+            episodeId: parseInt(el.getAttribute('data-episode_id') ?? '0', 10),
+            seasonId,
+            title: el.innerText.trim(),
+          }));
+          this._hydratedEpisodesMap.set(seasonId, eps);
+        }
+      }
+    } catch {
+      // Graceful degradation — leave seasons/episodes as-is
+    }
   }
 
   private parseSeasons(): Season[] {

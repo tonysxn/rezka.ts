@@ -1,6 +1,6 @@
 {
   "name": "rezka.ts",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Unofficial TypeScript API wrapper for the HDRezka streaming service",
   "author": "neverlxsss",
   "license": "ISC",

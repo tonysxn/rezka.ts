@@ -87,7 +87,13 @@ export async function load(url: string, options?: RezkaOptions): Promise<Media> 
 
   const http = options?._http ?? (options ? createHttpClient(options) : getDefaultHttp());
   const response = await http.get<string>(url);
-  return new Media(response.data, url, http);
+  const media = new Media(response.data, url, http);
+
+  if (media.seasons.length === 0 && media.hasSeriesSignal()) {
+    await media.hydrateFromAjax();
+  }
+
+  return media;
 }
 
 /**
